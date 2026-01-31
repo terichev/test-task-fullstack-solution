@@ -86,3 +86,42 @@ jobs:
 
       - name: Stop services
         run: docker-compose down
+
+  # Отправка результатов на сервер HR-Agent
+  report-results:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, docker-build]
+    if: always() && github.event_name == 'pull_request'
+
+    steps:
+      - name: Determine overall result
+        id: result
+        run: |
+          if [[ "${{ needs.backend-tests.result }}" == "success" && \
+                "${{ needs.frontend-tests.result }}" == "success" && \
+                "${{ needs.docker-build.result }}" == "success" ]]; then
+            echo "conclusion=success" >> $GITHUB_OUTPUT
+            echo "tests_passed=3" >> $GITHUB_OUTPUT
+          else
+            echo "conclusion=failure" >> $GITHUB_OUTPUT
+            PASSED=0
+            [[ "${{ needs.backend-tests.result }}" == "success" ]] && ((PASSED++)) || true
+            [[ "${{ needs.frontend-tests.result }}" == "success" ]] && ((PASSED++)) || true
+            [[ "${{ needs.docker-build.result }}" == "success" ]] && ((PASSED++)) || true
+            echo "tests_passed=$PASSED" >> $GITHUB_OUTPUT
+          fi
+          echo "tests_total=3" >> $GITHUB_OUTPUT
+
+      - name: Send results to HR-Agent
+        run: |
+          curl -X POST "https://hr.predictmarket.ru/api/v1/test-task/report" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "repo": "${{ github.repository }}",
+              "pr_number": ${{ github.event.pull_request.number }},
+              "run_id": ${{ github.run_id }},
+              "conclusion": "${{ steps.result.outputs.conclusion }}",
+              "tests_passed": ${{ steps.result.outputs.tests_passed }},
+              "tests_total": ${{ steps.result.outputs.tests_total }}
+            }' \
+            --fail-with-body || echo "Warning: Failed to send results to HR-Agent"
