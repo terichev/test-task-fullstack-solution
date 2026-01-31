@@ -1,6 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 
-const API_URL = 'http://localhost:8000/api/items'
+const API_URL = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api/items`
+  : 'http://localhost:8000/api/items'
+
+interface Item {
+  id: number
+  name: string
+  description: string | null
+  price: number | null
+}
 
 const styles = {
   container: {
@@ -40,6 +49,8 @@ const styles = {
   },
   list: {
     listStyle: 'none',
+    padding: 0,
+    margin: 0,
   },
   item: {
     padding: '15px',
@@ -55,81 +66,105 @@ const styles = {
     color: '#666',
     fontSize: '14px',
   },
+  error: {
+    color: '#dc3545',
+    padding: '10px',
+    marginBottom: '10px',
+    background: '#f8d7da',
+    borderRadius: '4px',
+  },
 }
 
 function ItemList() {
-  const [items, setItems] = useState([])
+  const [items, setItems] = useState<Item[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [price, setPrice] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Загрузка items при монтировании
     fetchItems()
 
-    // Polling каждые 5 секунд
     const interval = setInterval(() => {
       fetchItems()
     }, 5000)
 
-    // Слушатель событий для обновления
     const handleUpdate = () => fetchItems()
     window.addEventListener('items-updated', handleUpdate)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('items-updated', handleUpdate)
+    }
   }, [])
 
-  const fetchItems = () => {
-    fetch(API_URL)
-      .then(res => res.json())
-      .then(data => setItems(data.items))
+  const fetchItems = async () => {
+    try {
+      const res = await fetch(API_URL)
+      if (!res.ok) {
+        throw new Error(`HTTP error: ${res.status}`)
+      }
+      const data = await res.json()
+      setItems(data.items)
+      setError(null)
+    } catch (err) {
+      setError('Failed to load items')
+      console.error('Fetch error:', err)
+    }
   }
 
-  const handleSubmit = (e: any) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    setError(null)
 
-    fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, price: parseFloat(price) }),
-    }).then(() => {
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description: description || null,
+          price: price ? parseFloat(price) : null,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Failed to create item')
+      }
+
       fetchItems()
       setName('')
       setDescription('')
       setPrice('')
-    })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create item')
+    }
   }
 
-  const handleDelete = (id: any) => {
-    fetch(`${API_URL}/${id}`, { method: 'DELETE' })
-      .then(() => fetchItems())
-  }
-
-  const renderItem = (item: any) => {
-    // Отображение описания с HTML форматированием
-    return (
-      <li key={item.id} style={styles.item}>
-        <div>
-          <div style={styles.itemName}>{item.name}</div>
-          <div
-            style={styles.itemDescription}
-            dangerouslySetInnerHTML={{ __html: item.description }}
-          />
-          <div>${item.price}</div>
-        </div>
-        <button style={styles.deleteButton} onClick={() => handleDelete(item.id)}>
-          Delete
-        </button>
-      </li>
-    )
+  const handleDelete = async (id: number) => {
+    try {
+      const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        throw new Error('Failed to delete item')
+      }
+      fetchItems()
+    } catch (err) {
+      setError('Failed to delete item')
+    }
   }
 
   return (
     <div style={styles.container}>
+      {error && <div style={styles.error}>{error}</div>}
+
       <form style={styles.form} onSubmit={handleSubmit}>
         <input
           style={styles.input}
           placeholder="Name"
           value={name}
           onChange={e => setName(e.target.value)}
+          required
         />
         <input
           style={styles.input}
@@ -141,6 +176,8 @@ function ItemList() {
           style={styles.input}
           placeholder="Price"
           type="number"
+          min="0"
+          step="0.01"
           value={price}
           onChange={e => setPrice(e.target.value)}
         />
@@ -150,7 +187,23 @@ function ItemList() {
       </form>
 
       <ul style={styles.list}>
-        {items.map((item: any) => renderItem(item))}
+        {items.map((item) => (
+          <li key={item.id} style={styles.item}>
+            <div>
+              <div style={styles.itemName}>{item.name}</div>
+              {item.description && (
+                <div style={styles.itemDescription}>{item.description}</div>
+              )}
+              {item.price !== null && <div>${item.price.toFixed(2)}</div>}
+            </div>
+            <button
+              style={styles.deleteButton}
+              onClick={() => handleDelete(item.id)}
+            >
+              Delete
+            </button>
+          </li>
+        ))}
       </ul>
     </div>
   )
