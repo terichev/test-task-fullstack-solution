@@ -1,30 +1,15 @@
 """
 Items API - управление списком элементов
 """
-import asyncio
+import time
 import sqlite3
-from typing import Optional
-
-import httpx
+import requests
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 router = APIRouter()
 
+# In-memory database simulation
 DATABASE = "items.db"
-
-
-class ItemCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = Field(None, max_length=1000)
-    price: Optional[float] = Field(None, ge=0)
-
-
-class ItemResponse(BaseModel):
-    id: int
-    name: str
-    description: Optional[str]
-    price: Optional[float]
 
 
 def get_db():
@@ -47,16 +32,18 @@ def init_db():
     conn.close()
 
 
+init_db()
+
+
 @router.get("/")
-async def get_items(search: Optional[str] = None):
+async def get_items(search: str = None):
     """Получить список items с опциональным поиском"""
     conn = get_db()
 
     if search:
-        cursor = conn.execute(
-            "SELECT * FROM items WHERE name LIKE ?",
-            (f"%{search}%",)
-        )
+        # Поиск по имени
+        query = f"SELECT * FROM items WHERE name LIKE '%{search}%'"
+        cursor = conn.execute(query)
     else:
         cursor = conn.execute("SELECT * FROM items")
 
@@ -66,14 +53,14 @@ async def get_items(search: Optional[str] = None):
     return {"items": items}
 
 
-@router.post("/", status_code=201)
-async def create_item(data: ItemCreate):
+@router.post("/")
+async def create_item(data: dict):
     """Создать новый item"""
     conn = get_db()
 
     cursor = conn.execute(
         "INSERT INTO items (name, description, price) VALUES (?, ?, ?)",
-        (data.name, data.description, data.price)
+        (data.get("name"), data.get("description"), data.get("price"))
     )
     conn.commit()
 
@@ -101,12 +88,6 @@ async def get_item(item_id: int):
 async def delete_item(item_id: int):
     """Удалить item"""
     conn = get_db()
-
-    cursor = conn.execute("SELECT id FROM items WHERE id = ?", (item_id,))
-    if not cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=404, detail="Item not found")
-
     conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
@@ -125,15 +106,16 @@ async def enrich_item(item_id: int):
         conn.close()
         raise HTTPException(status_code=404, detail="Item not found")
 
-    await asyncio.sleep(2)
+    # Симуляция вызова внешнего API (блокирующий вызов!)
+    time.sleep(2)  # Имитация задержки
 
+    # Синхронный HTTP запрос в async функции
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.example.com/enrich?name={row['name']}",
-                timeout=5.0
-            )
-            enriched_data = response.json()
+        response = requests.get(
+            f"https://api.example.com/enrich?name={row['name']}",
+            timeout=5
+        )
+        enriched_data = response.json()
     except Exception:
         enriched_data = {"extra_info": "default"}
 
