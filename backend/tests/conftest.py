@@ -1,5 +1,6 @@
 import os
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_items.db"
@@ -26,7 +27,7 @@ def setup_test_db():
         os.remove(DATABASE)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     """Async test client"""
     transport = ASGITransport(app=app)
